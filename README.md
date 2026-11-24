@@ -39,13 +39,3 @@ Para forzar una variante (solo proveedor `local`): `?signup_flow=two_steps` o
 
 Todos se guardan también en `localStorage` (`ab_demo_events`): sirve como registro
 "de verdad" para comprobar si cada plataforma recibe los mismos eventos.
-
-## Integrar una plataforma
-
-Edita solo `src/experiment.js`: cambia `ACTIVE_PROVIDER` y completa `init(key)` (debe devolver una
-variante de `EXPERIMENTS[key].variants`) y `track(key, name, props)` en el proveedor correspondiente, siguiendo
-la documentación oficial de esa plataforma. VWO y ABlyft suelen añadir un script en `index.html`.
-
-Nota: el código no se ha ejecutado todavía en un entorno con red (no se pudo instalar
-dependencias al prepararlo), así que si `npm install` o `npm run dev` fallan, apunta el error
-como parte de tu medición de bloqueos.
