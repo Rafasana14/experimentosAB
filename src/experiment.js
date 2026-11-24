@@ -11,6 +11,12 @@
  * así que no se solapan. Para cada plataforma, completa el proveedor
  * correspondiente siguiendo SU documentación oficial.
  */
+import { GrowthBook } from "@growthbook/growthbook";
+import {
+  autoAttributesPlugin,
+  growthbookTrackingPlugin,
+} from "@growthbook/growthbook/plugins";
+
 export const EXPERIMENTS = {
   signup_flow: { variants: ["one_step", "two_steps"] },
   catalog_order: { variants: ["by_popularity", "by_interest"] },
@@ -18,7 +24,7 @@ export const EXPERIMENTS = {
 
 // Cambia este valor al probar cada plataforma:
 // "local" | "growthbook" | "posthog" | "statsig" | "ablyft" | "vwo"
-const ACTIVE_PROVIDER = "local";
+const ACTIVE_PROVIDER = "growthbook";
 
 const USER_KEY = "ab_demo_user"; // { <experimento>: <variante> }
 const LOG_KEY = "ab_demo_events";
@@ -59,22 +65,49 @@ const local = {
   track() { /* el registro local ya se hace en track() */ },
 };
 
-const pending = (name) => ({
-  async init() {
-    throw new Error(`Proveedor "${name}" pendiente de integrar: ver comentarios en experiment.js`);
+function getUserId() {
+  try {
+    let id = localStorage.getItem("ab_demo_uid");
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem("ab_demo_uid", id); }
+    return id;
+  } catch { return "anon"; }
+}
+
+const gb = new GrowthBook({
+  apiHost: "https://cdn.growthbook.io",
+  clientKey: "sdk-oDutJLL2lJjY9yfv",
+  plugins: [
+    autoAttributesPlugin(),
+    growthbookTrackingPlugin({
+      ingestorHost: "https://eu-west-1.gb-ingest.com",
+    }),
+  ],
+  enableDevMode: true,
+  trackingCallback: (experiment, result) => {
+    logLocally(experiment.key, "experiment_viewed", { variant: result.key });
   },
-  track() {},
 });
+
+const growthbookProvider = {
+  async init(key) {
+    await gb.init({ timeout: 2000 });
+    gb.setAttributes({ id: getUserId() });
+    return gb.getFeatureValue(key, EXPERIMENTS[key].variants[0]);
+  },
+  track(key, name, props) {
+  gb.logEvent(name, { experiment: key, ...props });
+},
+};
 
 // TODO por plataforma: init(key) debe devolver una variante de EXPERIMENTS[key].variants
 // y track(key, name, props) debe enviar el evento a la plataforma.
 const providers = {
   local,
-  growthbook: pending("growthbook"), // SDK JS + clave de cliente + experimento
-  posthog: pending("posthog"),       // posthog-js + feature flag multivariante
-  statsig: pending("statsig"),       // SDK cliente + experimento
-  ablyft: pending("ablyft"),         // script en index.html + editor/código de variante
-  vwo: pending("vwo"),               // script SmartCode en index.html
+  growthbook: growthbookProvider, // SDK JS + clave de cliente + experimento
+  //posthog: pending("posthog"),       // posthog-js + feature flag multivariante
+  //statsig: pending("statsig"),       // SDK cliente + experimento
+  //ablyft: pending("ablyft"),         // script en index.html + editor/código de variante
+  //vwo: pending("vwo"),               // script SmartCode en index.html
 };
 
 const provider = providers[ACTIVE_PROVIDER];
@@ -91,7 +124,9 @@ export function track(experiment, name, props = {}) {
 }
 
 export function resetUser() {
-  try { localStorage.removeItem(USER_KEY); } catch { /* ignorar */ }
+  try { localStorage.removeItem(USER_KEY);
+    localStorage.removeItem("ab_demo_uid");
+   } catch { /* ignorar */ }
   const params = new URLSearchParams(location.search);
   Object.keys(EXPERIMENTS).forEach((k) => params.delete(k));
   const q = params.toString();
