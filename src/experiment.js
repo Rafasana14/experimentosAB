@@ -11,6 +11,8 @@
  * así que no se solapan. Para cada plataforma, completa el proveedor
  * correspondiente siguiendo SU documentación oficial.
  */
+import { StatsigClient } from "@statsig/js-client";
+
 export const EXPERIMENTS = {
   signup_flow: { variants: ["one_step", "two_steps"] },
   catalog_order: { variants: ["by_popularity", "by_interest"] },
@@ -18,7 +20,7 @@ export const EXPERIMENTS = {
 
 // Cambia este valor al probar cada plataforma:
 // "local" | "growthbook" | "posthog" | "statsig" | "ablyft" | "vwo"
-const ACTIVE_PROVIDER = "local";
+const ACTIVE_PROVIDER = "statsig";
 
 const USER_KEY = "ab_demo_user"; // { <experimento>: <variante> }
 const LOG_KEY = "ab_demo_events";
@@ -59,6 +61,29 @@ const local = {
   track() { /* el registro local ya se hace en track() */ },
 };
 
+function getUserId() {
+  try {
+    let id = localStorage.getItem("ab_demo_uid");
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem("ab_demo_uid", id); }
+    return id;
+  } catch { return "anon"; }
+}
+
+const statsig = new StatsigClient("client-09ihOdZza28MFw1B6GU1lpFJLQY4ZtCd2xTS4P7BKgR", { userID: getUserId() });
+
+const statsigProvider = {
+  async init(key) {
+    await statsig.initializeAsync();
+    return statsig.getExperiment(key).get("variant", EXPERIMENTS[key].variants[0]);
+  },
+  track(key, name, props) {
+    const metadata = Object.fromEntries(
+      Object.entries({ experiment: key, ...props }).map(([k, v]) => [k, String(v)])
+    );
+    statsig.logEvent({ eventName: name, metadata });
+  },
+};
+
 const pending = (name) => ({
   async init() {
     throw new Error(`Proveedor "${name}" pendiente de integrar: ver comentarios en experiment.js`);
@@ -72,7 +97,7 @@ const providers = {
   local,
   growthbook: pending("growthbook"), // SDK JS + clave de cliente + experimento
   posthog: pending("posthog"),       // posthog-js + feature flag multivariante
-  statsig: pending("statsig"),       // SDK cliente + experimento
+  statsig: statsigProvider,       // SDK cliente + experimento
   ablyft: pending("ablyft"),         // script en index.html + editor/código de variante
   vwo: pending("vwo"),               // script SmartCode en index.html
 };
@@ -91,7 +116,10 @@ export function track(experiment, name, props = {}) {
 }
 
 export function resetUser() {
-  try { localStorage.removeItem(USER_KEY); } catch { /* ignorar */ }
+  try { 
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem("ab_demo_uid");
+  } catch { /* ignorar */ }
   const params = new URLSearchParams(location.search);
   Object.keys(EXPERIMENTS).forEach((k) => params.delete(k));
   const q = params.toString();
