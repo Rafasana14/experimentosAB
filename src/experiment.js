@@ -11,6 +11,8 @@
  * así que no se solapan. Para cada plataforma, completa el proveedor
  * correspondiente siguiendo SU documentación oficial.
  */
+import posthog from "posthog-js";
+
 export const EXPERIMENTS = {
   signup_flow: { variants: ["one_step", "two_steps"] },
   catalog_order: { variants: ["by_popularity", "by_interest"] },
@@ -18,7 +20,7 @@ export const EXPERIMENTS = {
 
 // Cambia este valor al probar cada plataforma:
 // "local" | "growthbook" | "posthog" | "statsig" | "ablyft" | "vwo"
-const ACTIVE_PROVIDER = "local";
+const ACTIVE_PROVIDER = "posthog";
 
 const USER_KEY = "ab_demo_user"; // { <experimento>: <variante> }
 const LOG_KEY = "ab_demo_events";
@@ -66,12 +68,33 @@ const pending = (name) => ({
   track() {},
 });
 
-// TODO por plataforma: init(key) debe devolver una variante de EXPERIMENTS[key].variants
-// y track(key, name, props) debe enviar el evento a la plataforma.
+posthog.init(import.meta.env.VITE_POSTHOG_PROJECT_TOKEN, {
+  api_host: import.meta.env.VITE_POSTHOG_HOST,
+  defaults: "2026-08-30",
+});
+
+const posthogProvider = {
+  init(key) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`PostHog no devolvió el flag "${key}"`)), 5000);
+      posthog.onFeatureFlags(() => {
+        const v = posthog.getFeatureFlag(key);
+        if (!v) return;
+        clearTimeout(timer);
+        resolve(v === "control" ? EXPERIMENTS[key].variants[0] : v);
+      });
+    });
+  },
+  track(key, name, props) {
+    posthog.capture(name, { experiment: key, ...props });
+  },
+};
+
 const providers = {
   local,
   growthbook: pending("growthbook"), // SDK JS + clave de cliente + experimento
-  posthog: pending("posthog"),       // posthog-js + feature flag multivariante
+  posthog: posthogProvider,       // posthog-js + feature flag multivariante
   statsig: pending("statsig"),       // SDK cliente + experimento
   ablyft: pending("ablyft"),         // script en index.html + editor/código de variante
   vwo: pending("vwo"),               // script SmartCode en index.html
@@ -91,7 +114,10 @@ export function track(experiment, name, props = {}) {
 }
 
 export function resetUser() {
-  try { localStorage.removeItem(USER_KEY); } catch { /* ignorar */ }
+  try { 
+    localStorage.removeItem(USER_KEY);
+    posthog.reset()
+  } catch { /* ignorar */ }
   const params = new URLSearchParams(location.search);
   Object.keys(EXPERIMENTS).forEach((k) => params.delete(k));
   const q = params.toString();
